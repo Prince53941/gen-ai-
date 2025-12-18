@@ -11,9 +11,15 @@ import numpy as np
 # ==============================
 # PAGE CONFIG
 # ==============================
-st.set_page_config(page_title="Image Generation Comparison", layout="wide")
-st.title("Autoencoder vs GAN vs Diffusion")
-st.write("Upload a ZIP file containing 10 images of the same object in different environments.")
+st.set_page_config(page_title="Bikes Image Generation", layout="wide")
+st.title("Autoencoder vs GAN vs Diffusion (Bikes Dataset)")
+st.write("Upload Bikes.zip containing images of bikes in different environments.")
+
+# ==============================
+# CONSTANTS (Bikes)
+# ==============================
+DATA_FOLDER = "Bikes"
+ZIP_NAME = "Bikes.zip"
 
 # ==============================
 # DATASET
@@ -100,32 +106,32 @@ class DiffusionNet(nn.Module):
         return self.net(x)
 
 # ==============================
-# ZIP UPLOAD
+# ZIP UPLOAD (Bikes.zip)
 # ==============================
-uploaded_zip = st.file_uploader("Upload ZIP file", type=["zip"])
+uploaded_zip = st.file_uploader("Upload Bikes.zip", type=["zip"])
 
 if uploaded_zip:
-    if os.path.exists("images"):
-        for root, dirs, files in os.walk("images", topdown=False):
+    if os.path.exists(DATA_FOLDER):
+        for root, dirs, files in os.walk(DATA_FOLDER, topdown=False):
             for f in files:
                 os.remove(os.path.join(root, f))
             for d in dirs:
                 os.rmdir(os.path.join(root, d))
     else:
-        os.mkdir("images")
+        os.mkdir(DATA_FOLDER)
 
     with zipfile.ZipFile(uploaded_zip, "r") as zip_ref:
-        zip_ref.extractall("images")
+        zip_ref.extractall(DATA_FOLDER)
 
-    dataset = ImageDataset("images")
+    dataset = ImageDataset(DATA_FOLDER)
     loader = DataLoader(dataset, batch_size=2, shuffle=True)
 
-    st.success(f"Loaded {len(dataset)} images")
+    st.success(f"Loaded {len(dataset)} bike images")
 
     if st.button("Start Training (10 Epochs)"):
 
         # ==============================
-        # AUTOENCODER TRAINING
+        # AUTOENCODER
         # ==============================
         ae = AutoEncoder()
         ae_opt = torch.optim.Adam(ae.parameters(), lr=0.001)
@@ -141,7 +147,7 @@ if uploaded_zip:
         st.success("Autoencoder Training Completed")
 
         # ==============================
-        # GAN TRAINING
+        # GAN
         # ==============================
         G = Generator()
         D = Discriminator()
@@ -169,7 +175,7 @@ if uploaded_zip:
         st.success("GAN Training Completed")
 
         # ==============================
-        # DIFFUSION TRAINING
+        # DIFFUSION
         # ==============================
         diff = DiffusionNet()
         diff_opt = torch.optim.Adam(diff.parameters(), lr=0.001)
@@ -186,27 +192,25 @@ if uploaded_zip:
         st.success("Diffusion Training Completed")
 
         # ==============================
-        # IMAGE GENERATION (FIXED)
+        # OUTPUT IMAGES
         # ==============================
         col1, col2, col3 = st.columns(3)
 
         with col1:
             st.subheader("Autoencoder Output")
             img = ae(torch.randn(1, 3, 64, 64))
-            img = img.squeeze().permute(1, 2, 0)
-            img = ((img + 1) / 2).detach().cpu().numpy()
+            img = ((img.squeeze().permute(1, 2, 0) + 1) / 2).detach().cpu().numpy()
             st.image(img, clamp=True)
 
         with col2:
             st.subheader("GAN Output")
             img = G(torch.randn(1, 100))
-            img = img.squeeze().permute(1, 2, 0)
-            img = ((img + 1) / 2).detach().cpu().numpy()
+            img = ((img.squeeze().permute(1, 2, 0) + 1) / 2).detach().cpu().numpy()
             st.image(img, clamp=True)
 
         with col3:
             st.subheader("Diffusion Output")
             img = diff(torch.randn(1, 3, 64, 64))
-            img = img.squeeze().permute(1, 2, 0)
-            img = ((img + 1) / 2).detach().cpu().numpy()
+            img = ((img.squeeze().permute(1, 2, 0) + 1) / 2).detach().cpu().numpy()
             st.image(img, clamp=True)
+
