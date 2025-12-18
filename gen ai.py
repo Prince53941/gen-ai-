@@ -9,17 +9,15 @@ from PIL import Image
 import numpy as np
 
 # ==============================
-# PAGE CONFIG
+# CONFIG
 # ==============================
-st.set_page_config(page_title="Bikes Image Generation", layout="wide")
-st.title("Autoencoder vs GAN vs Diffusion")
-st.write("Dataset: Bikes.zip (same object in different environments)")
-
-# ==============================
-# CONSTANTS
-# ==============================
+EPOCHS = 100
 ZIP_FILE = "Bikes.zip"
 DATA_FOLDER = "Bikes"
+
+st.set_page_config(page_title="Bikes Image Generation", layout="wide")
+st.title("Autoencoder vs GAN vs Diffusion (Bikes Dataset)")
+st.write("Training epochs set to 100")
 
 # ==============================
 # DATASET
@@ -71,7 +69,7 @@ class Generator(nn.Module):
     def __init__(self):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(1000, 256),
+            nn.Linear(100, 256),
             nn.ReLU(),
             nn.Linear(256, 3 * 64 * 64),
             nn.Tanh()
@@ -106,9 +104,9 @@ class DiffusionNet(nn.Module):
         return self.net(x)
 
 # ==============================
-# DATA LOADING FROM Bikes.zip
+# LOAD DATA FROM Bikes.zip
 # ==============================
-if st.button("Load Bikes.zip & Prepare Data"):
+if st.button("Load Bikes.zip"):
     if not os.path.exists(ZIP_FILE):
         st.error("Bikes.zip not found in project directory.")
     else:
@@ -134,16 +132,17 @@ if os.path.exists(DATA_FOLDER):
     dataset = ImageDataset(DATA_FOLDER)
     loader = DataLoader(dataset, batch_size=2, shuffle=True)
 
-    st.info(f"Total bike images loaded: {len(dataset)}")
+    st.info(f"Total images loaded: {len(dataset)}")
 
     if st.button("Start Training (100 Epochs)"):
+
+        mse = nn.MSELoss()
 
         # ---------- Autoencoder ----------
         ae = AutoEncoder()
         ae_opt = torch.optim.Adam(ae.parameters(), lr=0.001)
-        mse = nn.MSELoss()
 
-        for _ in range(100):
+        for _ in range(EPOCHS):
             for imgs in loader:
                 loss = mse(ae(imgs), imgs)
                 ae_opt.zero_grad()
@@ -159,10 +158,10 @@ if os.path.exists(DATA_FOLDER):
         d_opt = torch.optim.Adam(D.parameters(), lr=0.0002)
         bce = nn.BCELoss()
 
-        for _ in range(100):
+        for _ in range(EPOCHS):
             for real in loader:
                 b = real.size(0)
-                noise = torch.randn(b, 1000)
+                noise = torch.randn(b, 100)
                 fake = G(noise)
 
                 d_loss = bce(D(real), torch.ones(b, 1)) + \
@@ -182,7 +181,7 @@ if os.path.exists(DATA_FOLDER):
         diff = DiffusionNet()
         diff_opt = torch.optim.Adam(diff.parameters(), lr=0.001)
 
-        for _ in range(100):
+        for _ in range(EPOCHS):
             for imgs in loader:
                 noise = torch.randn_like(imgs)
                 noisy = imgs + noise
@@ -206,7 +205,7 @@ if os.path.exists(DATA_FOLDER):
 
         with col2:
             st.subheader("GAN Output")
-            img = G(torch.randn(1, 1000))
+            img = G(torch.randn(1, 100))
             img = ((img.squeeze().permute(1, 2, 0) + 1) / 2).detach().cpu().numpy()
             st.image(img, clamp=True)
 
