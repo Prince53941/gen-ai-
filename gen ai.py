@@ -6,13 +6,14 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
-import matplotlib.pyplot as plt
+import numpy as np
 
 # ==============================
 # PAGE CONFIG
 # ==============================
 st.set_page_config(page_title="Image Generation Comparison", layout="wide")
-st.title("Comparison of Autoencoder, GAN, and Diffusion Models")
+st.title("Autoencoder vs GAN vs Diffusion")
+st.write("Upload a ZIP file containing 10 images of the same object in different environments.")
 
 # ==============================
 # DATASET
@@ -101,12 +102,20 @@ class DiffusionNet(nn.Module):
 # ==============================
 # ZIP UPLOAD
 # ==============================
-uploaded_zip = st.file_uploader("Upload ZIP file (10 images)", type=["zip"])
+uploaded_zip = st.file_uploader("Upload ZIP file", type=["zip"])
 
 if uploaded_zip:
-    if not os.path.exists("images"):
-        with zipfile.ZipFile(uploaded_zip, "r") as zip_ref:
-            zip_ref.extractall("images")
+    if os.path.exists("images"):
+        for root, dirs, files in os.walk("images", topdown=False):
+            for f in files:
+                os.remove(os.path.join(root, f))
+            for d in dirs:
+                os.rmdir(os.path.join(root, d))
+    else:
+        os.mkdir("images")
+
+    with zipfile.ZipFile(uploaded_zip, "r") as zip_ref:
+        zip_ref.extractall("images")
 
     dataset = ImageDataset("images")
     loader = DataLoader(dataset, batch_size=2, shuffle=True)
@@ -116,15 +125,15 @@ if uploaded_zip:
     if st.button("Start Training (10 Epochs)"):
 
         # ==============================
-        # AUTOENCODER TRAIN
+        # AUTOENCODER TRAINING
         # ==============================
         ae = AutoEncoder()
         ae_opt = torch.optim.Adam(ae.parameters(), lr=0.001)
-        ae_loss_fn = nn.MSELoss()
+        mse = nn.MSELoss()
 
         for _ in range(10):
             for imgs in loader:
-                loss = ae_loss_fn(ae(imgs), imgs)
+                loss = mse(ae(imgs), imgs)
                 ae_opt.zero_grad()
                 loss.backward()
                 ae_opt.step()
@@ -132,7 +141,7 @@ if uploaded_zip:
         st.success("Autoencoder Training Completed")
 
         # ==============================
-        # GAN TRAIN
+        # GAN TRAINING
         # ==============================
         G = Generator()
         D = Discriminator()
@@ -146,13 +155,13 @@ if uploaded_zip:
                 noise = torch.randn(b, 100)
                 fake = G(noise)
 
-                d_loss = bce(D(real), torch.ones(b,1)) + \
-                         bce(D(fake.detach()), torch.zeros(b,1))
+                d_loss = bce(D(real), torch.ones(b, 1)) + \
+                         bce(D(fake.detach()), torch.zeros(b, 1))
                 d_opt.zero_grad()
                 d_loss.backward()
                 d_opt.step()
 
-                g_loss = bce(D(fake), torch.ones(b,1))
+                g_loss = bce(D(fake), torch.ones(b, 1))
                 g_opt.zero_grad()
                 g_loss.backward()
                 g_opt.step()
@@ -160,11 +169,10 @@ if uploaded_zip:
         st.success("GAN Training Completed")
 
         # ==============================
-        # DIFFUSION TRAIN
+        # DIFFUSION TRAINING
         # ==============================
         diff = DiffusionNet()
         diff_opt = torch.optim.Adam(diff.parameters(), lr=0.001)
-        mse = nn.MSELoss()
 
         for _ in range(10):
             for imgs in loader:
@@ -178,21 +186,27 @@ if uploaded_zip:
         st.success("Diffusion Training Completed")
 
         # ==============================
-        # IMAGE GENERATION
+        # IMAGE GENERATION (FIXED)
         # ==============================
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            st.subheader("Autoencoder")
-            img = ae(torch.randn(1,3,64,64)).squeeze().permute(1,2,0)
-            st.image((img+1)/2)
+            st.subheader("Autoencoder Output")
+            img = ae(torch.randn(1, 3, 64, 64))
+            img = img.squeeze().permute(1, 2, 0)
+            img = ((img + 1) / 2).detach().cpu().numpy()
+            st.image(img, clamp=True)
 
         with col2:
-            st.subheader("GAN")
-            img = G(torch.randn(1,100)).squeeze().permute(1,2,0)
-            st.image((img+1)/2)
+            st.subheader("GAN Output")
+            img = G(torch.randn(1, 100))
+            img = img.squeeze().permute(1, 2, 0)
+            img = ((img + 1) / 2).detach().cpu().numpy()
+            st.image(img, clamp=True)
 
         with col3:
-            st.subheader("Diffusion")
-            img = diff(torch.randn(1,3,64,64)).squeeze().permute(1,2,0)
-            st.image((img+1)/2)
+            st.subheader("Diffusion Output")
+            img = diff(torch.randn(1, 3, 64, 64))
+            img = img.squeeze().permute(1, 2, 0)
+            img = ((img + 1) / 2).detach().cpu().numpy()
+            st.image(img, clamp=True)
