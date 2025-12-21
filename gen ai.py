@@ -6,123 +6,126 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Executive Decision Suite", layout="wide")
+st.set_page_config(page_title="Executive Decision Board", layout="wide")
 
-# --- PROFESSIONAL STYLING ---
+# --- CLEAN EXECUTIVE STYLING ---
 st.markdown("""
 <style>
     .metric-card {
         background-color: #ffffff;
         padding: 20px;
-        border-radius: 12px;
+        border-radius: 10px;
         border: 1px solid #e1e4e8;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
         text-align: center;
-    }
-    .metric-label { font-size: 14px; color: #586069; font-weight: bold; text-transform: uppercase; }
-    .metric-value { font-size: 32px; color: #0047AB; font-weight: 800; }
-    .guide-box {
-        background-color: #f0f7ff;
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 5px solid #0047AB;
         margin-bottom: 20px;
     }
+    .metric-label { font-size: 14px; color: #586069; font-weight: 600; text-transform: uppercase; }
+    .metric-value { font-size: 32px; color: #0366d6; font-weight: 800; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 1. DATA LAYER (48 Months History) ---
+# --- 1. DATA LAYER (4-Year Monthly History) ---
 @st.cache_data
-def get_hist():
+def get_historical_data():
     dates = pd.date_range(end=datetime.today(), periods=48, freq='M')
     np.random.seed(42)
-    return pd.DataFrame({'Month': dates, 'Revenue_M': np.linspace(10, 14, 48) * np.random.normal(1, 0.05, 48)})
+    # Simulating a business with 40% growth over 4 years
+    rev_m = np.linspace(10.0, 14.0, 48) * np.random.normal(1, 0.05, 48)
+    margin_m = np.random.normal(0.35, 0.02, 48)
+    return pd.DataFrame({'Month': dates, 'Revenue_M': rev_m, 'EBITDA_Margin': margin_m})
 
-hist_df = get_hist()
+hist_df = get_historical_data()
+base_rev = hist_df.tail(12)['Revenue_M'].sum()
+base_margin = hist_df.tail(12)['EBITDA_Margin'].mean()
 
-# --- 2. SIDEBAR (YOUR EXISTING CONTROLS) ---
+# --- 2. SIDEBAR CONTROLS ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/1541/1541415.png", width=60)
-    st.title("Strategic Settings")
-    strategy = st.selectbox("Strategy:", ["Organic Growth", "Premium Pricing", "Aggressive Expansion", "Cost Optimization"])
+    st.title("Settings")
+    strategy = st.selectbox("Strategy:", ["Organic Growth", "Premium Pricing", "Expansion", "Cost Cutting"])
     
-    with st.expander("Revenue & Growth", expanded=True):
-        rev_val = st.slider("Starting Revenue ($M)", 50, 500, 150)
-        growth_mu = st.slider("Expected Growth (%)", 0, 50, 10) / 100
-        rev_sigma = st.slider("Revenue Volatility (%)", 5, 40, 20) / 100
-    with st.expander("Costs & Risks", expanded=True):
-        ebitda_mu = st.slider("Profit Margin (%)", 10, 60, 40) / 100
-        tax_rate = st.slider("Tax Rate (%)", 15, 35, 28) / 100
-        wacc = st.slider("WACC (Risk) (%)", 5, 20, 11) / 100
-        capex_val = st.slider("Investment ($M)", 5, 100, 35)
-        years = 5
+    st.subheader("Revenue & Growth")
+    rev_val = st.slider("Target Revenue ($M)", 50, 500, int(base_rev))
+    growth_mu = st.slider("Expected Growth (%)", 0, 50, 10) / 100
+    rev_sigma = st.slider("Market Risk/Volatility (%)", 5, 40, 20) / 100
+    
+    st.subheader("Profit & Costs")
+    ebitda_mu = st.slider("Profit Margin (%)", 10, 60, int(base_margin*100)) / 100
+    wacc = st.slider("Interest Rate (WACC) (%)", 5, 20, 11) / 100
+    capex_val = st.slider("Total Investment ($M)", 5, 100, 35)
+    
+    tax_rate = 0.25
+    years = 5
 
 # --- 3. SIMULATION ENGINE ---
 @st.cache_data
-def simulate(rev, growth, r_vol, margin, tax, cpcl, disc, yrs, iters=10000):
+def run_simulation(rev, growth, r_vol, margin, cpcl, disc, yrs):
     np.random.seed(42)
+    iters = 10000
     g_paths = np.random.normal(growth, r_vol, (iters, yrs))
     all_npvs = []
     for i in range(iters):
         revs = [rev]
-        for y in range(yrs - 1): revs.append(revs[-1] * (1 + g_paths[i, y]))
-        fcf = (np.array(revs) * margin) * (1 - tax)
+        for y in range(yrs - 1):
+            revs.append(revs[-1] * (1 + g_paths[i, y]))
+        fcf = (np.array(revs) * margin) * (1 - tax_rate)
         npv = np.sum([fcf[t] / (1 + disc)**(t+1) for t in range(yrs)]) - cpcl
         all_npvs.append(npv)
     return np.array(all_npvs)
 
-npvs = simulate(rev_val, growth_mu, rev_sigma, ebitda_mu, tax_rate, capex_val, wacc, years)
+npvs = run_simulation(rev_val, growth_mu, rev_sigma, ebitda_mu, capex_val, wacc, years)
 
-# --- 4. DASHBOARD UI ---
-st.title("Strategic Investment Decision Board")
-st.markdown(f"**Current Path:** `{strategy}` | **Time Horizon:** {years} Years")
+# --- 4. MAIN DASHBOARD UI ---
+st.title("Strategic Decision Board")
+st.markdown(f"**Strategy Focus:** {strategy} | **Analysis Period:** 5 Years")
 
-# TOP LEVEL KPI CARDS
+# TOP METRICS
 mean_profit = np.mean(npvs)
 success_rate = (npvs > 0).sum() / 10000 * 100
-safety_floor = np.percentile(npvs, 10) # P10 (Conservative)
+worst_case = np.percentile(npvs, 10)
 
-c1, c2, c3 = st.columns(3)
-with c1: st.markdown(f'<div class="metric-card"><p class="metric-label">Expected Total Profit</p><p class="metric-value">${mean_profit:,.1f}M</p></div>', unsafe_allow_html=True)
-with c2: st.markdown(f'<div class="metric-card"><p class="metric-label">Chance of Profit</p><p class="metric-value">{success_rate:.1f}%</p></div>', unsafe_allow_html=True)
-with c3: st.markdown(f'<div class="metric-card"><p class="metric-label">Safety Floor (Conservative)</p><p class="metric-value">${safety_floor:,.1f}M</p></div>', unsafe_allow_html=True)
+m1, m2, m3 = st.columns(3)
+with m1: st.markdown(f'<div class="metric-card"><p class="metric-label">Avg. Expected Profit</p><p class="metric-value">${mean_profit:,.1f}M</p></div>', unsafe_allow_html=True)
+with m2: st.markdown(f'<div class="metric-card"><p class="metric-label">Chance of Success</p><p class="metric-value">{success_rate:.1f}%</p></div>', unsafe_allow_html=True)
+with m3: st.markdown(f'<div class="metric-card"><p class="metric-label">Safety Floor (Worst Case)</p><p class="metric-value">${worst_case:,.1f}M</p></div>', unsafe_allow_html=True)
 
 st.divider()
 
 col_left, col_right = st.columns(2)
 
 with col_left:
-    st.markdown("""<div class="guide-box"><b>Decision 1: The Confidence Test</b><br>
-    Is the <b>Green area</b> significantly larger than the Red? 
-    If the Chance of Profit is below 80%, consider lowering your Initial Investment or increasing Margins.</div>""", unsafe_allow_html=True)
-    
-    # CHART 1: SIMPLE PROFIT vs LOSS DISTRIBUTION
-    fig1 = px.histogram(npvs, nbins=50, title="Profit & Loss Scenarios", 
-                        color=(npvs > 0), color_discrete_map={True: '#28a745', False: '#dc3545'},
-                        labels={'value': 'Total Project Value ($M)', 'count': 'Likelihood'})
-    fig1.update_layout(showlegend=False, plot_bgcolor='rgba(0,0,0,0)', 
-                      xaxis_title="Final Profit/Loss after 5 Years ($M)", yaxis_title="Probability Level")
+    # CHART 1: PROFIT VS LOSS
+    # Decision Logic: Green = Go, Red = Risk.
+    fig1 = px.histogram(
+        npvs, nbins=50, 
+        title="<b>DECISION 1: THE CONFIDENCE TEST</b><br><sup>Is the Green area much larger than Red? If Success is < 80%, the risk is high.</sup>",
+        color=(npvs > 0), 
+        color_discrete_map={True: '#28a745', False: '#dc3545'},
+        labels={'value': 'Total Profit/Loss ($M)', 'count': 'Number of Scenarios'}
+    )
+    fig1.add_vline(x=0, line_width=2, line_color="black")
+    fig1.update_layout(showlegend=False, title_font_size=18)
     st.plotly_chart(fig1, use_container_width=True)
 
 with col_right:
-    st.markdown("""<div class="guide-box"><b>Decision 2: The Stress Test</b><br>
-    How does Profit change if <b>Sales Growth</b> or <b>Interest Rates</b> shift? 
-    Look for your "current setup" in the middle. If a small drop in growth turns the box Red, the plan is too fragile.</div>""", unsafe_allow_html=True)
-    
-    # CHART 2: STRATEGIC HEATMAP (DECISION MATRIX)
+    # CHART 2: STRATEGY MATRIX
+    # Decision Logic: Find the center. If moving down/left turns it Red, the plan is fragile.
     w_range = np.linspace(wacc*0.7, wacc*1.3, 5)
     g_range = np.linspace(growth_mu*0.7, growth_mu*1.3, 5)
-    sens_matrix = [[(rev_val * (1+g) * ebitda_mu) / (w) - capex_val for w in w_range] for g in g_range]
+    sens = [[(rev_val * (1+g) * ebitda_mu * (1-tax_rate)) / (w) - capex_val for w in w_range] for g in g_range]
     
-    fig2 = px.imshow(sens_matrix, 
-                     x=[f"{int(x*100)}% Risk" for x in w_range], 
-                     y=[f"{int(y*100)}% Growth" for y in g_range],
-                     text_auto='.1f', title="Strategy Performance Matrix",
-                     color_continuous_scale='RdYlGn', aspect="auto")
-    fig2.update_xaxes(side="bottom", title="Market Risk (Interest Rates/WACC)")
-    fig2.update_yaxes(title="Annual Sales Growth")
+    fig2 = px.imshow(
+        sens, 
+        x=[f"{int(x*100)}% Risk" for x in w_range], 
+        y=[f"{int(y*100)}% Growth" for y in g_range],
+        text_auto='.1f', 
+        title="<b>DECISION 2: THE STRESS TEST</b><br><sup>If a drop in Growth (moving down) turns boxes Red, the plan is too fragile.</sup>",
+        color_continuous_scale='RdYlGn', 
+        aspect="auto"
+    )
+    fig2.update_layout(title_font_size=18)
     st.plotly_chart(fig2, use_container_width=True)
 
-# HISTORICAL FOOTER
-with st.expander("View Historical 4-Year Baseline"):
+# HISTORICAL REFERENCE
+with st.expander("Show 4-Year Historical Baseline"):
     st.line_chart(hist_df.set_index('Month')['Revenue_M'])
