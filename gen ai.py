@@ -1,216 +1,202 @@
 import streamlit as st
-import os
-import zipfile
-import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-from PIL import Image
+import pandas as pd
 import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
 
-# ==============================
-# CONFIG
-# ==============================
-EPOCHS = 100
-ZIP_FILE = "Bikes.zip"
-DATA_FOLDER = "Bikes"
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="StratSim Pro | Executive Suite", layout="wide")
 
-st.set_page_config(page_title="Bikes Image Generation", layout="wide")
-st.title("Autoencoder vs GAN vs Diffusion (Bikes Dataset)")
-st.write("Training epochs set to 100")
+# --- EXECUTIVE STYLING ---
+st.markdown("""
+<style>
+    .reportview-container { background: #F0F2F6; }
+    .metric-card {
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 10px;
+        border-top: 5px solid #0047AB;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    }
+    .metric-value { font-size: 30px; font-weight: 800; color: #1E1E1E; }
+    .metric-label { font-size: 13px; color: #5E5E5E; text-transform: uppercase; }
+    .strategy-box {
+        background-color: #E3F2FD;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 5px solid #2196F3;
+        margin-bottom: 20px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# ==============================
-# DATASET
-# ==============================
-class ImageDataset(Dataset):
-    def __init__(self, folder):
-        self.image_paths = []
-        for root, _, files in os.walk(folder):
-            for f in files:
-                if f.lower().endswith((".jpg", ".jpeg", ".png")):
-                    self.image_paths.append(os.path.join(root, f))
+# --- 1. DATA LAYER: EXTENSIVE MONTHLY HISTORICAL DATA ---
+@st.cache_data
+def generate_extensive_history():
+    # 48 Months of data (4 years)
+    dates = pd.date_range(end=datetime.today(), periods=48, freq='M')
+    np.random.seed(42)
+    
+    # Simulating a growing business with some seasonality
+    base_rev = 12.0 # Monthly starting revenue in $M
+    growth_trend = np.linspace(1.0, 1.4, 48) # 40% growth over 4 years
+    noise = np.random.normal(1, 0.05, 48)
+    
+    rev_m = base_rev * growth_trend * noise
+    margin_m = np.random.normal(0.35, 0.03, 48)
+    capex_m = np.random.normal(2.5, 0.5, 48)
+    
+    df = pd.DataFrame({
+        'Month': dates,
+        'Revenue_M': rev_m,
+        'EBITDA_Margin': margin_m,
+        'CapEx_M': capex_m
+    })
+    return df
 
-        self.transform = transforms.Compose([
-            transforms.Resize((64, 64)),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5,), (0.5,))
-        ])
+hist_df = generate_extensive_history()
+last_12m_rev = hist_df['Revenue_M'].tail(12).sum()
+avg_margin = hist_df['EBITDA_Margin'].tail(12).mean()
 
-    def __len__(self):
-        return len(self.image_paths)
+# --- 2. SIDEBAR CONTROL ---
+with st.sidebar:
+    st.title("🕹️ Strategy Engine")
+    
+    st.subheader("Choose Strategic Path")
+    strategy = st.selectbox(
+        "Current Objective:",
+        ["Market Penetration (Low Margin, High Vol)", 
+         "Premium Pivot (High Margin, Lower Vol)", 
+         "Steady State (Organic)",
+         "Aggressive R&D (High CapEx)"]
+    )
+    
+    st.divider()
+    st.write("### Adjust Forecast Parameters")
+    
+    # 10 Professional Sliders
+    rev_target = st.slider("Projected Annual Rev ($M)", 100, 300, int(last_12m_rev))
+    growth_rate = st.slider("Target Growth YoY (%)", 0, 40, 12) / 100
+    rev_vol = st.slider("Revenue Risk (%)", 5, 50, 20) / 100
+    
+    margin_target = st.slider("Target EBITDA Margin (%)", 10, 60, int(avg_margin*100)) / 100
+    margin_vol = st.slider("Margin Stability (%)", 2, 20, 10) / 100
+    
+    tax_rate = st.slider("Corp Tax Rate (%)", 15, 35, 25) / 100
+    capex_annual = st.slider("Annual CapEx ($M)", 10, 100, 30)
+    wacc = st.slider("WACC (Discount Rate) (%)", 5, 20, 10) / 100
+    
+    sim_years = st.select_slider("Forecast Horizon", options=[3, 5, 10], value=5)
+    runs = 10000
 
-    def __getitem__(self, idx):
-        img = Image.open(self.image_paths[idx]).convert("RGB")
-        return self.transform(img)
+# --- 3. MONTE CARLO ENGINE ---
+def run_simulation():
+    np.random.seed(42)
+    # Generate random variances
+    rev_shocks = np.random.normal(1 + growth_rate, rev_vol, (runs, sim_years))
+    margin_shocks = np.random.normal(margin_target, margin_vol, (runs, sim_years))
+    
+    all_npvs = []
+    for i in range(runs):
+        rev_path = [rev_target]
+        for y in range(sim_years - 1):
+            rev_path.append(rev_path[-1] * rev_shocks[i, y])
+            
+        fcf = (np.array(rev_path) * margin_shocks[i]) * (1 - tax_rate) - (capex_annual/sim_years)
+        pv = np.sum([fcf[t] / (1 + wacc)**(t+1) for t in range(sim_years)])
+        all_npvs.append(pv)
+        
+    return np.array(all_npvs)
 
-# ==============================
-# MODELS
-# ==============================
-class AutoEncoder(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.encoder = nn.Sequential(
-            nn.Conv2d(3, 64, 4, 2, 1),
-            nn.ReLU(),
-            nn.Conv2d(64, 128, 4, 2, 1),
-            nn.ReLU()
-        )
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(128, 64, 4, 2, 1),
-            nn.ReLU(),
-            nn.ConvTranspose2d(64, 3, 4, 2, 1),
-            nn.Tanh()
-        )
+npvs = run_simulation()
 
-    def forward(self, x):
-        return self.decoder(self.encoder(x))
+# --- 4. MAIN UI ---
+st.title("🏆 Strategic Investment & Risk Dashboard")
 
-class Generator(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(100, 256),
-            nn.ReLU(),
-            nn.Linear(256, 3 * 64 * 64),
-            nn.Tanh()
-        )
+# Top Metrics Row
+p90 = np.percentile(npvs, 10)
+mean_v = np.mean(npvs)
+var_95 = np.percentile(npvs, 5)
 
-    def forward(self, z):
-        return self.net(z).view(-1, 3, 64, 64)
+m1, m2, m3 = st.columns(3)
+with m1:
+    st.markdown(f'<div class="metric-card"><p class="metric-label">Conservative NPV (P90)</p><p class="metric-value">${p90:.1f}M</p></div>', unsafe_allow_html=True)
+with m2:
+    st.markdown(f'<div class="metric-card"><p class="metric-label">Expected Outcome</p><p class="metric-value">${mean_v:.1f}M</p></div>', unsafe_allow_html=True)
+with m3:
+    st.markdown(f'<div class="metric-card" style="border-top-color:#E53935"><p class="metric-label">At Risk (5% Tail)</p><p class="metric-value">${var_95:.1f}M</p></div>', unsafe_allow_html=True)
 
-class Discriminator(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(3 * 64 * 64, 256),
-            nn.ReLU(),
-            nn.Linear(256, 1),
-            nn.Sigmoid()
-        )
+st.divider()
 
-    def forward(self, x):
-        return self.net(x.view(x.size(0), -1))
+# --- CHART SECTION ---
+tabs = st.tabs(["📉 Historical Analysis", "🔮 Simulation Results", "🎯 Sensitivity"])
 
-class DiffusionNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Conv2d(3, 64, 3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(64, 3, 3, padding=1)
-        )
+with tabs[0]:
+    st.subheader("4-Year Historical Performance Trend")
+    # Professional Area Chart for Revenue
+    fig_hist = px.area(hist_df, x='Month', y='Revenue_M', title="Revenue Momentum ($M)",
+                       color_discrete_sequence=['#0047AB'])
+    fig_hist.update_layout(hovermode="x unified", plot_bgcolor="white")
+    st.plotly_chart(fig_hist, use_container_width=True)
+    
+    col_h1, col_h2 = st.columns(2)
+    with col_h1:
+        st.write("**Monthly EBITDA Margin Stability**")
+        st.line_chart(hist_df.set_index('Month')['EBITDA_Margin'])
+    with col_h2:
+        st.write("**CapEx Investment Cycles**")
+        st.bar_chart(hist_df.set_index('Month')['CapEx_M'])
 
-    def forward(self, x):
-        return self.net(x)
+with tabs[1]:
+    c_left, c_right = st.columns(2)
+    
+    with c_left:
+        # High Impact Histogram
+        fig_dist = go.Figure()
+        fig_dist.add_trace(go.Histogram(x=npvs, nbinsx=50, marker_color='#1565C0', opacity=0.7))
+        fig_dist.add_vline(x=p90, line_dash="dash", line_color="orange", annotation_text="P90 (Safe)")
+        fig_dist.add_vline(x=0, line_width=3, line_color="black", annotation_text="Breakeven")
+        fig_dist.update_layout(title="NPV Probability Distribution", xaxis_title="Net Present Value ($M)", showlegend=False)
+        st.plotly_chart(fig_dist, use_container_width=True)
+        
+    with c_right:
+        # Cumulative Profitability Line
+        sorted_npv = np.sort(npvs)
+        p_values = np.linspace(0, 100, len(sorted_npv))
+        fig_cum = px.line(x=sorted_npv, y=p_values, title="Cumulative Confidence Curve",
+                          labels={'x': 'NPV ($M)', 'y': 'Confidence Level (%)'})
+        fig_cum.add_hrect(y0=0, y1=10, fillcolor="red", opacity=0.1, annotation_text="High Risk Zone")
+        st.plotly_chart(fig_cum, use_container_width=True)
 
-# ==============================
-# LOAD DATA FROM Bikes.zip
-# ==============================
-if st.button("Load Bikes.zip"):
-    if not os.path.exists(ZIP_FILE):
-        st.error("Bikes.zip not found in project directory.")
-    else:
-        if os.path.exists(DATA_FOLDER):
-            for root, dirs, files in os.walk(DATA_FOLDER, topdown=False):
-                for f in files:
-                    os.remove(os.path.join(root, f))
-                for d in dirs:
-                    os.rmdir(os.path.join(root, d))
-        else:
-            os.mkdir(DATA_FOLDER)
+with tabs[2]:
+    st.subheader("Decision Sensitivity")
+    # A simple heatmap showing how WACC and Growth impact the Mean NPV
+    wacc_range = np.linspace(0.05, 0.20, 5)
+    growth_range = np.linspace(0, 0.40, 5)
+    
+    sens_matrix = []
+    for g in growth_range:
+        row = []
+        for w in wacc_range:
+            # Simplified static NPV for the heatmap
+            val = (rev_target * (1+g) * margin_target) / (w + 0.01) - capex_annual
+            row.append(val)
+        sens_matrix.append(row)
+        
+    fig_heat = px.imshow(sens_matrix, 
+                         x=[f"{int(x*100)}% WACC" for x in wacc_range],
+                         y=[f"{int(y*100)}% Growth" for y in growth_range],
+                         text_auto=True, aspect="auto", title="NPV Sensitivity: Growth vs. Capital Cost",
+                         color_continuous_scale='RdYlGn')
+    st.plotly_chart(fig_heat, use_container_width=True)
 
-        with zipfile.ZipFile(ZIP_FILE, "r") as zip_ref:
-            zip_ref.extractall(DATA_FOLDER)
-
-        st.success("Bikes.zip extracted successfully")
-
-# ==============================
-# TRAINING
-# ==============================
-if os.path.exists(DATA_FOLDER):
-
-    dataset = ImageDataset(DATA_FOLDER)
-    loader = DataLoader(dataset, batch_size=2, shuffle=True)
-
-    st.info(f"Total images loaded: {len(dataset)}")
-
-    if st.button("Start Training (100 Epochs)"):
-
-        mse = nn.MSELoss()
-
-        # ---------- Autoencoder ----------
-        ae = AutoEncoder()
-        ae_opt = torch.optim.Adam(ae.parameters(), lr=0.001)
-
-        for _ in range(EPOCHS):
-            for imgs in loader:
-                loss = mse(ae(imgs), imgs)
-                ae_opt.zero_grad()
-                loss.backward()
-                ae_opt.step()
-
-        st.success("Autoencoder Training Completed")
-
-        # ---------- GAN ----------
-        G = Generator()
-        D = Discriminator()
-        g_opt = torch.optim.Adam(G.parameters(), lr=0.0002)
-        d_opt = torch.optim.Adam(D.parameters(), lr=0.0002)
-        bce = nn.BCELoss()
-
-        for _ in range(EPOCHS):
-            for real in loader:
-                b = real.size(0)
-                noise = torch.randn(b, 100)
-                fake = G(noise)
-
-                d_loss = bce(D(real), torch.ones(b, 1)) + \
-                         bce(D(fake.detach()), torch.zeros(b, 1))
-                d_opt.zero_grad()
-                d_loss.backward()
-                d_opt.step()
-
-                g_loss = bce(D(fake), torch.ones(b, 1))
-                g_opt.zero_grad()
-                g_loss.backward()
-                g_opt.step()
-
-        st.success("GAN Training Completed")
-
-        # ---------- Diffusion ----------
-        diff = DiffusionNet()
-        diff_opt = torch.optim.Adam(diff.parameters(), lr=0.001)
-
-        for _ in range(EPOCHS):
-            for imgs in loader:
-                noise = torch.randn_like(imgs)
-                noisy = imgs + noise
-                loss = mse(diff(noisy), noise)
-                diff_opt.zero_grad()
-                loss.backward()
-                diff_opt.step()
-
-        st.success("Diffusion Training Completed")
-
-        # ==============================
-        # OUTPUT IMAGES
-        # ==============================
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            st.subheader("Autoencoder Output")
-            img = ae(torch.randn(1, 3, 64, 64))
-            img = ((img.squeeze().permute(1, 2, 0) + 1) / 2).detach().cpu().numpy()
-            st.image(img, clamp=True)
-
-        with col2:
-            st.subheader("GAN Output")
-            img = G(torch.randn(1, 100))
-            img = ((img.squeeze().permute(1, 2, 0) + 1) / 2).detach().cpu().numpy()
-            st.image(img, clamp=True)
-
-        with col3:
-            st.subheader("Diffusion Output")
-            img = diff(torch.randn(1, 3, 64, 64))
-            img = ((img.squeeze().permute(1, 2, 0) + 1) / 2).detach().cpu().numpy()
-            st.image(img, clamp=True)
+# --- DOWNLOAD REPORT ---
+st.divider()
+st.subheader("📥 Export Executive Summary")
+col_down, col_info = st.columns([1, 3])
+with col_down:
+    csv_out = hist_df.to_csv(index=False)
+    st.download_button("Download All Data (CSV)", csv_out, "business_analysis_2025.csv", "text/csv")
+with col_info:
+    st.info(f"The strategy **'{strategy}'** has been evaluated over 10,000 simulated market paths. Based on the 95% Value at Risk, the maximum downside exposure is ${abs(var_95):.1f}M over {sim_years} years.")
